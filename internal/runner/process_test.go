@@ -1,7 +1,9 @@
 package runner
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -122,14 +124,26 @@ func TestSetProcessGroup(t *testing.T) {
 }
 
 func TestKillProcessGroupStubbornProcess(t *testing.T) {
-	// Start a process that traps SIGTERM and ignores it.
-	// This forces the SIGKILL path after the 3-second timeout.
-	cmd := exec.Command("sh", "-c", "trap '' TERM; sleep 30")
+	// Write a script that traps SIGTERM and ignores it. We can't use
+	// sh -c "trap '' TERM; sleep 30" because Build/exec splits args
+	// with strings.Fields, and the direct exec.Command call here with
+	// separate args also needs the trap to work inside the process group.
+	scriptDir := t.TempDir()
+	scriptPath := filepath.Join(scriptDir, "stubborn.sh")
+	script := "#!/bin/sh\ntrap '' TERM\nsleep 30\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatalf("failed to write script: %v", err)
+	}
+
+	cmd := exec.Command(scriptPath)
 	SetProcessGroup(cmd)
 
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start stubborn process: %v", err)
 	}
+
+	// Give the trap time to be installed.
+	time.Sleep(100 * time.Millisecond)
 
 	start := time.Now()
 	err := KillProcessGroup(cmd)

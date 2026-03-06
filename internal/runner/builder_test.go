@@ -15,12 +15,12 @@ func TestBuildSuccess(t *testing.T) {
 }
 
 func TestBuildFailure(t *testing.T) {
-	err := Build(context.Background(), "sh -c exit 1")
+	err := Build(context.Background(), "false")
 	if err == nil {
 		t.Fatal("expected error for failing command, got nil")
 	}
-	if !strings.Contains(err.Error(), "exit code") {
-		t.Errorf("expected error to contain 'exit code', got: %v", err)
+	if !strings.Contains(err.Error(), "exit code 1") {
+		t.Errorf("expected error to contain 'exit code 1', got: %v", err)
 	}
 }
 
@@ -51,17 +51,21 @@ func TestBuildContextTimeout(t *testing.T) {
 }
 
 func TestBuildExitCodes(t *testing.T) {
+	// Use awk BEGIN{exit(N)} because strings.Fields splits on whitespace,
+	// so sh -c "exit N" doesn't work — the entire -c argument must be
+	// a single token with no spaces.
 	tests := []struct {
+		name     string
 		cmd      string
 		wantCode string
 	}{
-		{"sh -c exit 1", "exit code 1"},
-		{"sh -c exit 2", "exit code 2"},
-		{"sh -c exit 42", "exit code 42"},
+		{"exit 1", "false", "exit code 1"},
+		{"exit 2", "awk BEGIN{exit(2)}", "exit code 2"},
+		{"exit 42", "awk BEGIN{exit(42)}", "exit code 42"},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.cmd, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			err := Build(context.Background(), tt.cmd)
 			if err == nil {
 				t.Fatal("expected error, got nil")
