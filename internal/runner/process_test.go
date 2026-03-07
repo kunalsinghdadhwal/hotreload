@@ -124,10 +124,6 @@ func TestSetProcessGroup(t *testing.T) {
 }
 
 func TestKillProcessGroupStubbornProcess(t *testing.T) {
-	// Write a script that traps SIGTERM and ignores it. We can't use
-	// sh -c "trap '' TERM; sleep 30" because Build/exec splits args
-	// with strings.Fields, and the direct exec.Command call here with
-	// separate args also needs the trap to work inside the process group.
 	scriptDir := t.TempDir()
 	scriptPath := filepath.Join(scriptDir, "stubborn.sh")
 	script := "#!/bin/sh\ntrap '' TERM\nsleep 30\n"

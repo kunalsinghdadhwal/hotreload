@@ -1,57 +1,55 @@
 package internal
 
 import (
+	"log/slog"
 	"sync"
 	"time"
 )
 
-const (
-	backoffBase  = 1 * time.Second
-	backoffMax   = 30 * time.Second
-	backoffMulti = 2
-	crashWindow  = 10 * time.Second
-)
-
 // Backoff implements exponential backoff for crash-loop detection.
-// When a process crashes repeatedly within a short window, each
-// successive restart waits progressively longer before retrying.
+// When a process crashes repeatedly within a short window (10s), each
+// successive restart waits progressively longer (1s, 2s, 4s … 30s)
+// before retrying.
 type Backoff struct {
-	mu        sync.Mutex
-	crashes   int
-	lastCrash time.Time
+	mu         sync.Mutex
+	crashes    int
+	lastCrash  time.Time
+	maxBackoff time.Duration
 }
 
-// NewBackoff creates a Backoff with zero state.
+// NewBackoff creates a Backoff with a maximum backoff of 30 seconds.
 func NewBackoff() *Backoff {
-	return &Backoff{}
+	return &Backoff{maxBackoff: 30 * time.Second}
 }
 
 // RecordCrash records a crash event and returns the duration the caller
-// should wait before restarting. If crashes are spaced far apart (outside
-// the crash window), the counter resets and no wait is applied.
+// should wait before restarting. The first crash in a series never incurs
+// a wait; repeated crashes within 10 seconds trigger exponential backoff.
 func (b *Backoff) RecordCrash() time.Duration {
+	return b.recordCrash(time.Now())
+}
+
+// recordCrash is the internal implementation of RecordCrash, accepting an
+// explicit timestamp to allow deterministic testing without real clocks.
+func (b *Backoff) recordCrash(now time.Time) time.Duration {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	now := time.Now()
-	if !b.lastCrash.IsZero() && now.Sub(b.lastCrash) > crashWindow {
+	if !b.lastCrash.IsZero() && now.Sub(b.lastCrash) > 10*time.Second {
 		b.crashes = 0
 	}
-	b.lastCrash = now
 	b.crashes++
+	b.lastCrash = now
 
-	if b.crashes <= 1 {
-		return 0
-	}
-
-	wait := backoffBase
-	for i := 2; i < b.crashes; i++ {
-		wait *= time.Duration(backoffMulti)
-		if wait > backoffMax {
-			wait = backoffMax
-			break
+	var wait time.Duration
+	if b.crashes > 1 {
+		wait = time.Duration(1<<uint(b.crashes-2)) * time.Second
+		if wait > b.maxBackoff {
+			wait = b.maxBackoff
 		}
 	}
+
+	slog.Warn("crash recorded", "crash_count", b.crashes, "backoff", wait)
 	return wait
 }
 
@@ -61,4 +59,12 @@ func (b *Backoff) Reset() {
 	defer b.mu.Unlock()
 	b.crashes = 0
 	b.lastCrash = time.Time{}
+	slog.Info("backoff reset \u2014 server started successfully")
+}
+
+// CrashCount returns the current crash count under mutex.
+func (b *Backoff) CrashCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.crashes
 }

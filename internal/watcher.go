@@ -113,26 +113,35 @@ func (w *Watcher) Errors() <-chan error {
 
 // HandleCreateEvent processes a file system event. For Create events it stats
 // the path and, if it is a directory, recursively adds watches for the new
-// subtree. For Remove and Rename events it removes the watch (no-op if the
-// path was not watched).
+// subtree. This handles the race where mkdir -p creates a/b/c/d faster than
+// watches can be registered — by the time we stat 'a' and call AddRecursive,
+// subdirectories b/c/d already exist and WalkDir catches them all.
+// For Remove and Rename events it removes the watch (no-op if the path was
+// not watched). All other event types are ignored.
 func (w *Watcher) HandleCreateEvent(event fsnotify.Event) {
-	if event.Has(fsnotify.Create) {
+	switch {
+	case event.Has(fsnotify.Create):
 		info, err := os.Stat(event.Name)
 		if err != nil {
-			slog.Debug("stat failed for new path", "path", event.Name, "error", err)
+			// Path was deleted before we could stat it — a real race.
 			return
 		}
 		if info.IsDir() {
 			if err := w.AddRecursive(event.Name); err != nil {
 				slog.Warn("failed to watch new directory", "path", event.Name, "error", err)
+				return
 			}
+			slog.Info("new directory detected, watching", "path", event.Name)
 		}
-	}
 
-	if event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) {
-		// Remove is a no-op if the path is not currently watched.
+	case event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename):
 		_ = w.fsw.Remove(event.Name)
 	}
+}
+
+// WatchList returns the list of paths currently being watched.
+func (w *Watcher) WatchList() []string {
+	return w.fsw.WatchList()
 }
 
 // Close closes the underlying fsnotify watcher and releases all inotify

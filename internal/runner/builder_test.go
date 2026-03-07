@@ -51,9 +51,6 @@ func TestBuildContextTimeout(t *testing.T) {
 }
 
 func TestBuildExitCodes(t *testing.T) {
-	// Use awk BEGIN{exit(N)} because strings.Fields splits on whitespace,
-	// so sh -c "exit N" doesn't work — the entire -c argument must be
-	// a single token with no spaces.
 	tests := []struct {
 		name     string
 		cmd      string
