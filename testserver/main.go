@@ -1,5 +1,3 @@
-// Package main implements a minimal HTTP server for demonstrating
-// the hotreload tool. Change VERSION and save to observe a live rebuild.
 package main
 
 import (
@@ -9,19 +7,38 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 )
 
-// VERSION is displayed in the HTTP response — change this value and save
-// to see hotreload rebuild and restart the server automatically.
-const VERSION = "v1"
+const VERSION = "v2"
 
-// PORT is the address the demo server listens on.
 const PORT = ":8080"
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, nil)))
+	slog.SetDefault(slog.New(
+		slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level:     slog.LevelInfo,
+			AddSource: true,
+			ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+				switch a.Key {
+
+				case slog.TimeKey:
+					return slog.Attr{}
+
+				case slog.LevelKey:
+					a.Key = "lvl"
+
+				case slog.SourceKey:
+					src := a.Value.Any().(*slog.Source)
+					src.File = filepath.Base(src.File)
+				}
+
+				return a
+			},
+		}),
+	))
 	slog.Info("server starting", "version", VERSION, "port", PORT)
 
 	mux := http.DefaultServeMux

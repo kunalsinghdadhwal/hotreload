@@ -7,15 +7,32 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/kunalsinghdadhwal/hotreload/internal"
 )
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})))
+	slog.SetDefault(slog.New(
+		slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level:     slog.LevelInfo,
+			AddSource: true,
+			ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+				switch a.Key {
+
+				case slog.TimeKey:
+					return slog.Attr{}
+
+				case slog.SourceKey:
+					src := a.Value.Any().(*slog.Source)
+					src.File = filepath.Base(src.File)
+				}
+
+				return a
+			},
+		}),
+	))
 
 	root := flag.String("root", ".", "root directory to watch")
 	build := flag.String("build", "", "build command (required)")

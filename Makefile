@@ -28,7 +28,8 @@ test:
 coverage:
 	@echo "Generating coverage report..."
 	go test ./... -coverprofile=coverage.out
-	go tool cover -html=coverage.out
+	go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report written to coverage.html"
 
 clean:
 	@echo "Cleaning..."

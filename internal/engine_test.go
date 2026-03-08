@@ -161,3 +161,103 @@ func TestCancelledContextReturnsNil(t *testing.T) {
 		t.Fatalf("Run should return nil on cancelled context, got: %v", err)
 	}
 }
+
+func TestBuildFailureDoesNotCrash(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Use a build command that always fails.
+	cfg, err := NewConfig(dir, "false", "sleep 3600")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	eng, err := NewEngine(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- eng.Run(ctx)
+	}()
+
+	// Give time for the failed build to run.
+	time.Sleep(500 * time.Millisecond)
+
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
+func TestServerCrashTriggersRebuild(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	counter := filepath.Join(dir, "build.counter")
+	buildScript := filepath.Join(dir, "build.sh")
+	if err := os.WriteFile(buildScript, []byte("#!/bin/bash\necho 1 >> "+counter+"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Use "false" as the exec command — it exits immediately with error,
+	// simulating a server crash which should trigger onProcessExit → rebuild.
+	cfg, err := NewConfig(dir, buildScript, "false")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	eng, err := NewEngine(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- eng.Run(ctx)
+	}()
+
+	// Wait for at least 2 builds: initial + crash-triggered rebuild.
+	deadline := time.After(5 * time.Second)
+	for {
+		data, _ := os.ReadFile(counter)
+		lines := len(strings.Split(strings.TrimSpace(string(data)), "\n"))
+		if lines >= 2 {
+			break
+		}
+		select {
+		case <-deadline:
+			cancel()
+			t.Fatalf("expected at least 2 builds from crash loop, got %d", lines)
+		default:
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
+	cancel()
+	<-errCh
+}
+
+func TestRecordCrashPublic(t *testing.T) {
+	b := NewBackoff()
+	// The public RecordCrash method should work the same as recordCrash.
+	wait := b.RecordCrash()
+	if wait != 0 {
+		t.Errorf("first crash: want 0, got %v", wait)
+	}
+	wait = b.RecordCrash()
+	if wait != 1*time.Second {
+		t.Errorf("second crash: want 1s, got %v", wait)
+	}
+}

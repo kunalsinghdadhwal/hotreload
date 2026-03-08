@@ -114,13 +114,15 @@ func (e *Engine) runBuild(ctx context.Context) {
 	slog.Info("build succeeded, starting server")
 	if err := e.executor.Start(); err != nil {
 		slog.Error("failed to start server", "err", err)
+		e.mu.Lock()
+		e.building = false
+		e.mu.Unlock()
+		return
 	}
 
 	e.mu.Lock()
 	e.building = false
 	e.mu.Unlock()
-
-	e.backoff.Reset()
 }
 
 // onProcessExit is called by the executor when the server process exits.
@@ -129,14 +131,18 @@ func (e *Engine) runBuild(ctx context.Context) {
 func (e *Engine) onProcessExit(err error) {
 	e.mu.Lock()
 	stopped := e.stopped
+	building := e.building
 	e.mu.Unlock()
 
-	if stopped {
+	// If stopped or a build is in flight (meaning we intentionally killed
+	// the server for a rebuild), ignore this exit.
+	if stopped || building {
 		return
 	}
 
 	if err == nil {
 		slog.Info("server exited cleanly")
+		e.backoff.Reset()
 		return
 	}
 
